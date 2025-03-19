@@ -1,0 +1,62 @@
+SuperGee
+0.0                   !   Mach
+0     0     0.0       !   iYsym  iZsym  Zsym
+0.0   0.0   0.0       !   Sref   Cref   Bref   reference area, chord, span
+0.0   0.0   0.0       !   Xref   Yref   Zref   moment reference location (arb.)
+0.0                   !   CDp
+#
+#==============================================================
+#
+SURFACE
+Wing
+0  0.0  0  0.0   ! Nchord   Cspace   Nspan  Sspace
+#
+# reflect image wing about y=0 plane
+YDUPLICATE
+     0.00000 
+#
+# twist angle bias for whole surface
+ANGLE
+     0.0   
+#
+SCALE
+  1.0   1.0   1.0
+#
+# x,y,z bias for whole surface
+TRANSLATE
+   0.00000     0.00000     0.90000
+#
+#--------------------------------------------------------------
+#    Xle         Yle         Zle         chord       angle
+SECTION
+    0.0          0.0          0.0        6.465       0.000
+AFIL
+synergyII/20150114-50-root.dat
+
+#-----------------------------
+#    Xle         Yle         Zle         chord       angle
+SECTION
+    0.1722       11.91        0.0        6.21        -0.22 ! 0.037
+AFIL
+synergyII/20141224-46-first.dat
+
+#-----------------------------
+#    Xle         Yle         Zle         chord       angle
+SECTION
+    0.8435        20.729      0.0         5.251       -0.41 ! 0.867
+AFIL
+synergyII/20150427-38-2-second.dat
+
+#-----------------------------
+#    Xle         Yle         Zle         chord       angle
+SECTION
+    1.7829       26.753        0.0        3.909        -0.56 ! 1.012
+AFIL
+synergyII/20141224-26-third.dat
+
+#-----------------------------
+#    Xle         Yle         Zle         chord       angle
+SECTION
+    2.5242       30.021        0.0        2.408        -0.74 ! 2.85
+AFIL
+synergyII/20150310c-tip.dat

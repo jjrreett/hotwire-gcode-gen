@@ -21,6 +21,13 @@ def get_rot_mat(alpha):
     return np.array([[cos_a, 0, sin_a], [0, 1, 0], [-sin_a, 0, cos_a]])
 
 
+def get_rot_mat2d(alpha):
+    """Create a rotation matrix for rotation around the y-axis."""
+    angle_rad = np.radians(alpha)
+    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[cos_a, sin_a], [-sin_a, cos_a]])
+
+
 @dataclass
 class Airfoil:
     name: str
@@ -83,6 +90,11 @@ class Section:
     def get_rot_mat(self):
         """Create a rotation matrix for rotation around the y-axis."""
         return get_rot_mat(self.angle)
+
+    def get_transformed_xy_coords(self):
+        return self.chord * (
+            get_rot_mat2d(self.angle) @ self.airfoil.xy_coords.T
+        ).T + np.array([[self.x_le, self.z_le]])
 
 
 @dataclass
@@ -283,8 +295,10 @@ def parse_section(lines: deque[str], surface_name, Nspan=None, Sspace=None) -> S
             print_debug("contol = ", name, gain, Xhinge, XYZhvec, SgnDup)
             continue
 
-        # all subsections accounted for, the current token must be part of a diffrent section. Break out and pass evaluation back to the caller
-        return Section(Xle, Yle, Zle, Chord, Ainc, Nspan, Sspace, filename, airfoil)
+        break
+
+    # all subsections accounted for, the current token must be part of a diffrent section. Break out and pass evaluation back to the caller
+    return Section(Xle, Yle, Zle, Chord, Ainc, Nspan, Sspace, filename, airfoil)
 
 
 def get_wing_surface_from_avl_file(filename: str) -> Surface:
