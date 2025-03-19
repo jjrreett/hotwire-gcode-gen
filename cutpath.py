@@ -3,11 +3,8 @@ from rich import print
 import geometry
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.interpolate
-import scipy.integrate
 import shapely.geometry
 import shapely.plotting
-import functools
 
 DEBUG = False
 
@@ -31,44 +28,6 @@ class Chainable:
 def print_debug(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
-
-
-def resample_surface(surface: np.ndarray, num_points: int) -> np.ndarray:
-    """
-    Resample an airfoil surface to have `num_points` evenly spaced along its arc length.
-
-    Parameters:
-        surface (np.ndarray): The original surface points (N x 2) with columns [x, z].
-        num_points (int): The number of evenly spaced points.
-
-    Returns:
-        np.ndarray: The resampled surface points (num_points x 2).
-    """
-
-    if surface.shape[1] == 2:
-        y = 1
-    else:
-        y = 2
-
-    # Compute cumulative arc length
-    distances = np.sqrt(np.diff(surface[:, 0]) ** 2 + np.diff(surface[:, y]) ** 2)
-    arc_length = np.concatenate(([0], np.cumsum(distances)))
-
-    # Create interpolation functions for x and z
-    interp_x = scipy.interpolate.interp1d(arc_length, surface[:, 0], kind="linear")
-    interp_z = scipy.interpolate.interp1d(arc_length, surface[:, y], kind="linear")
-
-    # Generate new evenly spaced arc length values
-    new_arc_length = np.linspace(0, arc_length[-1], num_points)
-
-    # Compute new x and z values
-    new_x = interp_x(new_arc_length)
-    new_z = interp_z(new_arc_length)
-
-    new_coords = np.column_stack((new_x, new_z))
-    if y == 2:
-        new_coords = np.insert(new_coords, 1, 0, axis=1)
-    return new_coords
 
 
 def extend_lead_out(linestring: shapely.geometry.LineString, lead_out_length=0.1):
@@ -195,8 +154,10 @@ def connect_lead_out(linestring: shapely.geometry.LineString, point):
 def compute_cutpaths(
     coords: np.ndarray, kerf=0.1, start_point=-1, exit_point=10, plot=False
 ):
-    coords = resample_surface(coords, 1000)
     shape = shapely.geometry.LineString(coords)
+    shape = shapely.geometry.LineString(
+        shape.interpolate(np.linspace(0, 1, 1000, endpoint=True), normalized=True)
+    )
     cutline = shape.parallel_offset(kerf / 2)
 
     cutline_coords = np.array(cutline.coords)
@@ -206,6 +167,12 @@ def compute_cutpaths(
         Chainable(
             shapely.geometry.LineString(cutline_coords[: leading_edge_idx + 1][::-1])
         )
+        .apply(
+            shapely.geometry.LineString.interpolate,
+            distance=np.linspace(0, 1, 1000, endpoint=True),
+            normalized=True,
+        )
+        .apply(shapely.geometry.LineString)
         .apply(tangent_lead_in, target_deg=50)
         .apply(
             extend_lead_out,
@@ -219,6 +186,12 @@ def compute_cutpaths(
 
     btm_cut = (
         Chainable(shapely.geometry.LineString(cutline_coords[leading_edge_idx:]))
+        .apply(
+            shapely.geometry.LineString.interpolate,
+            distance=np.linspace(0, 1, 1000, endpoint=True),
+            normalized=True,
+        )
+        .apply(shapely.geometry.LineString)
         .apply(tangent_lead_in, target_deg=-45)
         .apply(
             extend_lead_out,
