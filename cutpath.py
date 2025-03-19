@@ -5,10 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import shapely.geometry
 import shapely.plotting
+import matplotlib.lines
 
 DEBUG = False
 
 geometry.DEBUG = DEBUG
+
+inch = 25.4
 
 
 class Chainable:
@@ -152,7 +155,7 @@ def connect_lead_out(linestring: shapely.geometry.LineString, point):
 
 
 def compute_cutpaths(
-    coords: np.ndarray, kerf=0.1, start_point=-1, exit_point=10, plot=False
+    coords: np.ndarray, kerf=0.1, start_point=-1, exit_point=10, plot=None
 ):
     shape = shapely.geometry.LineString(coords)
     shape = shapely.geometry.LineString(
@@ -204,26 +207,184 @@ def compute_cutpaths(
     )
 
     if plot:
-        fig = plt.figure()
-        ax = fig.add_subplot(
-            111,
-            # projection="3d"
+        shapely.plotting.plot_line(shape, ax=plot, add_points=False)
+
+        plot.add_line(
+            LineDataUnits(
+                np.array(top_cut.coords)[:, 0],
+                np.array(top_cut.coords)[:, 1],
+                linewidth=kerf,
+                alpha=0.4,
+            )
         )
-        # ax.plot(shape.coords[:, 0], shape.coords[:, 1])
-        shapely.plotting.plot_line(shape, add_points=False)
-        shapely.plotting.plot_line(top_cut, add_points=False, color="b")
-        shapely.plotting.plot_line(btm_cut, add_points=False, color="r")
-        # shapely.plotting.plot_line(btm_cutline, add_points=False, color="r")
-        ax.axis("equal")
-        plt.show()
+        plot.add_line(
+            LineDataUnits(
+                np.array(btm_cut.coords)[:, 0],
+                np.array(btm_cut.coords)[:, 1],
+                linewidth=kerf,
+                alpha=0.4,
+            )
+        )
 
     return (top_cut, btm_cut)
+
+
+class LineDataUnits(matplotlib.lines.Line2D):
+    def __init__(self, *args, **kwargs):
+        _lw_data = kwargs.pop("linewidth", 1)
+        super().__init__(*args, **kwargs)
+        self._lw_data = _lw_data
+
+    def _get_lw(self):
+        if self.axes is not None:
+            ppd = 72.0 / self.axes.figure.dpi
+            trans = self.axes.transData.transform
+            return ((trans((1, self._lw_data)) - trans((0, 0))) * ppd)[1]
+        else:
+            return 1
+
+    def _set_lw(self, lw):
+        self._lw_data = lw
+
+    _linewidth = property(_get_lw, _set_lw)
+
+
+def find_intersection(x1, y1, z1, x2, y2, z2, target_z):
+    """
+    Find the intersection of the line formed by point1 and point2 with a plane at target_z.
+
+    Parameters:
+        point1 (tuple): The first point (x, y, z).
+        point2 (tuple): The second point (x, y, z).
+        target_z (float): The target z-value of the plane.
+
+    Returns:
+        tuple: The intersection point (x, y, target_z).
+    """
+
+    # If the line is vertical (z1 == z2), no intersection is needed; just return the target_z
+    if z1 == z2:
+        return (x1, y1, target_z)
+
+    # Compute the parameter t for interpolation at target_z
+    t = (target_z - z1) / (z2 - z1)
+
+    # Interpolate x and y at target_z
+    x_intersection = x1 + t * (x2 - x1)
+    y_intersection = y1 + t * (y2 - y1)
+
+    return (x_intersection, y_intersection, target_z)
+
+
+def project_cut_paths_to_planes(
+    left_cut: shapely.geometry.LineString,
+    right_cut: shapely.geometry.LineString,
+    z_left,
+    z_right,
+    z_project_left,
+    z_project_right,
+):
+    """
+    Project the left and right cut paths onto a parallel plane at z_plane.
+
+    Parameters:
+        left_cut (LineString): The left cut path as a LineString.
+        right_cut (LineString): The right cut path as a LineString.
+        z_plane (float): The z-coordinate of the plane.
+
+    Returns:
+        tuple: Two LineStrings representing the projected left and right cut paths.
+    """
+    left_projected = []
+    right_projected = []
+
+    # Iterate over corresponding points in both cut paths
+    for left_point, right_point in zip(left_cut.coords, right_cut.coords):
+        # Project the left and right cut points to the target plane
+        projected_left_point = find_intersection(
+            *left_point, z_left, *right_point, z_right, z_project_left
+        )
+        projected_right_point = find_intersection(
+            *left_point, z_left, *right_point, z_right, z_project_right
+        )
+
+        # Append the projected points
+        left_projected.append(projected_left_point)
+        right_projected.append(projected_right_point)
+
+    # Convert projected points back into LineStrings
+    left_proj_line = shapely.geometry.LineString(left_projected)
+    right_proj_line = shapely.geometry.LineString(right_projected)
+
+    return left_proj_line, right_proj_line
+
+
+def compute_gcode(
+    left_top_cut: shapely.geometry.LineString,
+    right_top_cut: shapely.geometry.LineString,
+    left_btm_cut: shapely.geometry.LineString,
+    right_btm_cut: shapely.geometry.LineString,
+):
+    gcode = """\
+(Program Start)
+G17 G21 G90 G40 G49 G64
+(Initial Height)
+"""
+
+    for (x, y, _), (u, z, _) in zip(left_top_cut.coords, right_top_cut.coords):
+        gcode += f"G1 X{x*inch:06.2f} Y{y*inch:06.2f} A{u*inch:06.2f} Z{z*inch:06.2f}\n"
+
+    gcode += "(TODO transition between top and bottom cut)"
+
+    for (x, y, _), (u, z, _) in zip(left_btm_cut.coords, right_btm_cut.coords):
+        gcode += f"G1 X{x*inch:06.2f} Y{y*inch:06.2f} A{u*inch:06.2f} Z{z*inch:06.2f}\n"
+
+    gcode += "M2\n"
+
+    return gcode
 
 
 if __name__ == "__main__":
     rich.traceback.install()
     # Example usage
     wing = geometry.get_wing_surface_from_avl_file("supergee.avl")
-    compute_cutpaths(
-        wing.sections[0].airfoil.xy_coords * wing.sections[0].chord, plot=True
+
+    left = wing.sections[0]
+    right = wing.sections[1]
+    offset = np.array([[left.x_le, 0]])
+    fig = plt.figure()
+    ax = fig.add_subplot()
+
+    left_top_cut, left_btm_cut = compute_cutpaths(
+        left.airfoil.xy_coords * left.chord + np.array([[left.x_le, 0]]) - offset,
+        plot=ax,
     )
+    right_top_cut, right_btm_cut = compute_cutpaths(
+        right.airfoil.xy_coords * right.chord + np.array([[right.x_le, 0]]) - offset,
+        plot=ax,
+    )
+
+    left_top_cut, right_top_cut = project_cut_paths_to_planes(
+        left_top_cut, right_top_cut, 1, 10, 0, 11
+    )
+    left_btm_cut, right_btm_cut = project_cut_paths_to_planes(
+        left_btm_cut, right_btm_cut, 1, 10, 0, 11
+    )
+
+    shapely.plotting.plot_line(left_top_cut, add_points=False)
+    shapely.plotting.plot_line(left_btm_cut, add_points=False)
+    shapely.plotting.plot_line(right_top_cut, add_points=False, color="r")
+    shapely.plotting.plot_line(right_btm_cut, add_points=False, color="r")
+
+    ax.axis("equal")
+    # plt.show()
+
+    gcode = compute_gcode(
+        left_top_cut,
+        right_top_cut,
+        left_btm_cut,
+        right_btm_cut,
+    )
+    import pathlib
+
+    pathlib.Path("out.nc").write_text(gcode)
