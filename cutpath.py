@@ -90,9 +90,11 @@ def tangent_lead_in(linestring: shapely.geometry.LineString, target_deg=60):
     return shapely.geometry.LineString(new_coords)
 
 
-def indexed_lead_in(linestring: shapely.geometry.LineString, index, x_intersect):
+def indexed_lead_in(
+    linestring: shapely.geometry.LineString, index, x_intersect, y_intersect
+):
     coords = list(linestring.coords)
-    new_coords = [(x_intersect, 0)] + coords[index:]
+    new_coords = [(x_intersect, y_intersect)] + coords[index:]
     return shapely.geometry.LineString(new_coords)
 
 
@@ -161,7 +163,10 @@ def connect_lead_out(linestring: shapely.geometry.LineString, point):
 
 
 def compute_cutpaths(
-    coords: np.ndarray, kerf=0.1, start_point=-1, exit_point=10, plot=None, **kwargs
+    coords: np.ndarray,
+    kerf=0.1,
+    start_point=-1,
+    exit_point=10,
 ):
     shape = shapely.geometry.LineString(coords)
     shape = shapely.geometry.LineString(
@@ -171,6 +176,8 @@ def compute_cutpaths(
 
     cutline_coords = np.array(cutline.coords)
     leading_edge_idx = np.argmin(cutline_coords[:, 0])
+
+    leading_edge_y = cutline_coords[leading_edge_idx, 1]
 
     top_cut = (
         Chainable(
@@ -182,15 +189,17 @@ def compute_cutpaths(
             normalized=True,
         )
         .apply(shapely.geometry.LineString)
-        # .apply(tangent_lead_in, target_deg=50)
-        .apply(indexed_lead_in, 25, cutline_coords[leading_edge_idx, 0] - kerf)
+        .apply(
+            indexed_lead_in,
+            25,
+            cutline_coords[leading_edge_idx, 0] - kerf,
+            leading_edge_y,
+        )
         .apply(
             extend_lead_out,
             lead_out_length=kerf / 2 + 0.5,
         )
-        # .apply(converge_to_x_lead_out, exit_angle_deg=30)
-        .apply(connect_lead_in, shapely.geometry.Point((start_point, 0)))
-        # .apply(connect_lead_out, shapely.geometry.Point((exit_point, 0)))
+        .apply(connect_lead_in, shapely.geometry.Point((start_point, leading_edge_y)))
         .result()
     )
 
@@ -202,39 +211,19 @@ def compute_cutpaths(
             normalized=True,
         )
         .apply(shapely.geometry.LineString)
-        # .apply(tangent_lead_in, target_deg=-45)
-        .apply(indexed_lead_in, 20, cutline_coords[leading_edge_idx, 0] - kerf)
+        .apply(
+            indexed_lead_in,
+            20,
+            cutline_coords[leading_edge_idx, 0] - kerf,
+            leading_edge_y,
+        )
         .apply(
             extend_lead_out,
             lead_out_length=kerf / 2 + 0.5,
         )
-        # .apply(converge_to_x_lead_out, exit_angle_deg=-30)
-        .apply(connect_lead_in, shapely.geometry.Point((start_point, 0)))
-        # .apply(connect_lead_out, shapely.geometry.Point((exit_point, 0)))
+        .apply(connect_lead_in, shapely.geometry.Point((start_point, leading_edge_y)))
         .result()
     )
-
-    if plot:
-        shapely.plotting.plot_line(shape, ax=plot, add_points=False, **kwargs)
-
-        plot.add_line(
-            LineDataUnits(
-                np.array(top_cut.coords)[:, 0],
-                np.array(top_cut.coords)[:, 1],
-                linewidth=kerf,
-                alpha=0.4,
-                **kwargs,
-            ),
-        )
-        plot.add_line(
-            LineDataUnits(
-                np.array(btm_cut.coords)[:, 0],
-                np.array(btm_cut.coords)[:, 1],
-                linewidth=kerf,
-                alpha=0.4,
-                **kwargs,
-            ),
-        )
 
     return (top_cut, btm_cut)
 
@@ -343,13 +332,13 @@ G17 G21 G90 G40 G49 G64
     assert len(left_top_cut.coords) == len(right_top_cut.coords)
 
     for (x, y, _), (u, z, _) in zip(left_top_cut.coords, right_top_cut.coords):
-        gcode += f"G1 X{x*inch:06.2f} Y{y*inch:06.2f} A{u*inch:06.2f} Z{z*inch:06.2f}\n"
+        gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f}\n"
 
     gcode += "(TODO transition between top and bottom cut)"
 
     assert len(left_btm_cut.coords) == len(right_btm_cut.coords)
     for (x, y, _), (u, z, _) in zip(left_btm_cut.coords, right_btm_cut.coords):
-        gcode += f"G1 X{x*inch:06.2f} Y{y*inch:06.2f} A{u*inch:06.2f} Z{z*inch:06.2f}\n"
+        gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f}\n"
 
     gcode += "M2\n"
 
@@ -377,13 +366,32 @@ if __name__ == "__main__":
     from main import plot_3d
     # plot_3d(wing)
 
+    import pyvista as pv
+    import numpy as np
+
+    # Create a PyVista plotter
+    plotter = pv.Plotter()
+
+    # Define Machine Volume (cutting area)
+    machine_bounds = pv.Box(bounds=(0, 20, 0, 10, 0, 20))
+    plotter.add_mesh(machine_bounds, color="gray", opacity=0.3, style="wireframe")
+
+    # Define Stock Volume (material to be cut)
+    stock = pv.Box(bounds=(0, 10, 0, 2, 3, 11))
+    plotter.add_mesh(stock, color="pink", opacity=0.5)
+
     left = wing.sections[3]
     right = wing.sections[4]
     offset = np.array([[left.x_le, 0]])
-    fig = plt.figure()
-    ax = fig.add_subplot()
+    # fig = plt.figure()
+    # ax = fig.add_subplot()
 
     left_coords = left.get_transformed_xy_coords()
+    pv_line = pv.MultipleLines(
+        np.column_stack((left_coords, np.full(left_coords.shape[0], 3)))
+    )
+    plotter.add_mesh(pv_line, color="blue", line_width=2)
+
     # plot_line_3d(
     #     shapely.geometry.LineString(
     #         np.column_stack((left_coords, np.full(left_coords.shape[0], 3)))
@@ -393,7 +401,7 @@ if __name__ == "__main__":
 
     left_top_cut, left_btm_cut = compute_cutpaths(
         left_coords,
-        plot=ax,
+        # plot=ax,
     )
     right_coords = right.get_transformed_xy_coords()
     # plot_line_3d(
@@ -407,7 +415,11 @@ if __name__ == "__main__":
     #     ),
     #     ax,
     # )
-    right_top_cut, right_btm_cut = compute_cutpaths(right_coords, plot=ax, color="r")
+    right_top_cut, right_btm_cut = compute_cutpaths(
+        right_coords,
+        # plot=ax,
+        #  color="r"
+    )
 
     left_top_cut, right_top_cut = project_cut_paths_to_planes(
         left_top_cut, right_top_cut, 3, right.y_le + 3 - left.y_le, 0, 15
@@ -421,13 +433,14 @@ if __name__ == "__main__":
     # plot_line_3d(left_btm_cut, ax)
     # plot_line_3d(right_btm_cut, ax)
 
-    shapely.plotting.plot_line(left_top_cut, add_points=False)
-    shapely.plotting.plot_line(left_btm_cut, add_points=False)
-    shapely.plotting.plot_line(right_top_cut, add_points=False, color="r")
-    shapely.plotting.plot_line(right_btm_cut, add_points=False, color="r")
+    # shapely.plotting.plot_line(left_top_cut, add_points=False)
+    # shapely.plotting.plot_line(left_btm_cut, add_points=False)
+    # shapely.plotting.plot_line(right_top_cut, add_points=False, color="r")
+    # shapely.plotting.plot_line(right_btm_cut, add_points=False, color="r")
 
-    ax.axis("equal")
-    plt.show()
+    # ax.axis("equal")
+    # plt.show()
+    plotter.show()
 
     gcode = compute_gcode(
         left_top_cut,
