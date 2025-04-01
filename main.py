@@ -1,5 +1,8 @@
 from dataclasses import dataclass
+from typing import Optional
 from xml.etree.ElementTree import TreeBuilder
+
+import shapely.ops
 import rich.traceback
 from rich import print
 import geometry
@@ -13,6 +16,7 @@ import shapely.geometry
 import shapely
 import shapely.affinity
 
+inch = 25.4
 
 def plot_3d(wing: geometry.Surface):
     fig = plt.figure()
@@ -200,41 +204,144 @@ class WingSection:
             airfoil,
             xoff=le_x,  # yoff=le_y
         )  # Move to leading edge
+
+        airfoil = shapely.ops.transform(lambda x, y: (x, y, 0.0), airfoil)
         return airfoil
+def compute_gcode(
+    left_top_cut: shapely.geometry.LineString,
+    right_top_cut: shapely.geometry.LineString,
+    left_btm_cut: shapely.geometry.LineString,
+    right_btm_cut: shapely.geometry.LineString,
+    trailing_edge: Optional[tuple[float]] = None,
+):
+    
+    if not trailing_edge:
+        trailing_edge = (
+            max([x for (x, _, _) in left_top_cut.coords]),
+            max([x for (x, _, _) in right_top_cut.coords])
+        )
+    gcode = """\
+(Program Start)
+G17 G21 G90 G40 G49 G64
+(Initial Height)
+"""
+
+    RAPID_HEIGHT = 3
+    FEED = 200
+
+    y, z = 0.0, 0.0
+    x, u = 0, 0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = RAPID_HEIGHT, RAPID_HEIGHT
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+
+    x, u = trailing_edge
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = 0.0, 0.0
+    gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    x, u = 10, 10
+    gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = RAPID_HEIGHT, RAPID_HEIGHT
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    x, u = 0, 0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = 0.0, 0.0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
 
 
-def cut_section(section, machine_def):
-    leading_edge_offset_x = machine_def["stock"]["offset"]["absoluteX"] + 0.25
-    leading_edge_offset_y = (
-        machine_def["stock"]["offset"]["absoluteY"]
-        + machine_def["stock"]["volume"]["deltaY"] / 2
-    )
-    leading_edge_offset_z = machine_def["stock"]["offset"]["absoluteZ"]
+
+    assert len(left_top_cut.coords) == len(right_top_cut.coords)
+
+    (_, y, _), (_, z, _) = left_top_cut.coords[0], right_top_cut.coords[0]
+
+    # Add rapid move up to Y and Z
+    gcode += f"G0 Y{y * inch:06.2f} Z{z * inch:06.2f}\n"
+    for (x, y, _), (u, z, _) in zip(left_top_cut.coords, right_top_cut.coords):
+        gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+
+
+    y, z = RAPID_HEIGHT, RAPID_HEIGHT
+    gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    x, u = 0, 0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = 0.0, 0.0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+
+
+
+    assert len(left_btm_cut.coords) == len(right_btm_cut.coords)
+    (_, y, _), (_, z, _) = left_btm_cut.coords[0], right_btm_cut.coords[0]
+
+    # Add rapid move up to Y and Z
+    gcode += f"G0 Y{y * inch:06.2f} Z{z * inch:06.2f}\n"
+    for (x, y, _), (u, z, _) in zip(left_btm_cut.coords, right_btm_cut.coords):
+        gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = RAPID_HEIGHT, RAPID_HEIGHT
+    gcode += f"G1 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    x, u = 0, 0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    y, z = 0.0, 0.0
+    gcode += f"G0 X{x * inch:06.2f} Y{y * inch:06.2f} A{u * inch:06.2f} Z{z * inch:06.2f} F{FEED}\n"
+    gcode += "M2\n"
+
+    return gcode
+
+def cut_section(section: WingSection, machine_def):
 
     plotter = pv.Plotter()
     setup_scene(plotter, machine_def)
 
-    points = shapely.get_coordinates(section._transformed_inner_airfoil, include_z=True)
-    points[:, 0] += leading_edge_offset_x
-    points[:, 1] += leading_edge_offset_y
-    points[:, 2] = leading_edge_offset_z
+    INSET_AIRFOIL = 0.25
 
+    trailing_edge = (
+        section.inner_le_x + section.inner_chord + INSET_AIRFOIL + machine_def["stock"]["offset"]["absoluteX"],
+        section.outer_le_x + section.outer_chord + INSET_AIRFOIL + machine_def["stock"]["offset"]["absoluteX"]
+        )
+    
+    # wing_csys to stock cysy
+    inner_airfoil = shapely.affinity.translate(
+            section._transformed_inner_airfoil,
+            xoff=INSET_AIRFOIL, 
+            yoff=machine_def["cut"]["leading_edge_offsetY"], 
+            zoff=0
+        )
+    outer_airfoil = shapely.affinity.translate(
+            section._transformed_outer_airfoil,
+            xoff=INSET_AIRFOIL, 
+            yoff=machine_def["cut"]["leading_edge_offsetY"], 
+            zoff= -section.deltaZ
+        )
+    
+    # stock csys to machine csys
+    inner_airfoil = shapely.affinity.translate(
+            inner_airfoil,
+            xoff=machine_def["stock"]["offset"]["absoluteX"], 
+            yoff=machine_def["stock"]["offset"]["absoluteY"], 
+            zoff=machine_def["stock"]["offset"]["absoluteZ"]
+        )
+    
+    outer_airfoil = shapely.affinity.translate(
+        outer_airfoil,
+        xoff=machine_def["stock"]["offset"]["absoluteX"], 
+        yoff=machine_def["stock"]["offset"]["absoluteY"], 
+        zoff=machine_def["stock"]["offset"]["absoluteZ"]
+    )
+    
+
+    points = shapely.get_coordinates(inner_airfoil, include_z=True)
     inner_top_cut, inner_btm_cut = cutpath.compute_cutpaths(
         points,
         kerf=machine_def["cut"]["kerf"],
-        start_point=machine_def["stock"]["offset"]["absoluteX"] - 1,
+        start_point=machine_def["stock"]["offset"]["absoluteX"] - 0,
     )
     l = pv.lines_from_points(points)
     plotter.add_mesh(l, color="#fc33ff")
 
-    points = shapely.get_coordinates(section._transformed_outer_airfoil, include_z=True)
-    points[:, 0] += leading_edge_offset_x
-    points[:, 1] += leading_edge_offset_y
-    points[:, 2] = leading_edge_offset_z - section.deltaZ
+    points = shapely.get_coordinates(outer_airfoil, include_z=True)
     outer_top_cut, outer_btm_cut = cutpath.compute_cutpaths(
         points,
         kerf=machine_def["cut"]["kerf"],
-        start_point=machine_def["stock"]["offset"]["absoluteX"] - 1,
+        start_point=machine_def["stock"]["offset"]["absoluteX"] - 0,
     )
     l = pv.lines_from_points(
         points,
@@ -244,16 +351,16 @@ def cut_section(section, machine_def):
     inner_top_code, outer_top_code = cutpath.project_cut_paths_to_planes(
         inner_top_cut,
         outer_top_cut,
-        leading_edge_offset_z,
-        leading_edge_offset_z - section.deltaZ,
+        machine_def["stock"]["offset"]["absoluteZ"],
+        machine_def["stock"]["offset"]["absoluteZ"] - section.deltaZ,
         0,
         -machine_def["work"]["volume"]["deltaZ"],
     )
     left_btm_code, right_btm_code = cutpath.project_cut_paths_to_planes(
         inner_btm_cut,
         outer_btm_cut,
-        leading_edge_offset_z,
-        leading_edge_offset_z - section.deltaZ,
+        machine_def["stock"]["offset"]["absoluteZ"],
+        machine_def["stock"]["offset"]["absoluteZ"] - section.deltaZ,
         0,
         -machine_def["work"]["volume"]["deltaZ"],
     )
@@ -265,14 +372,25 @@ def cut_section(section, machine_def):
         plotter.add_mesh(l, color="g")
     plotter.show()
 
+    gcode = compute_gcode(
+        inner_top_code,
+        outer_top_code,
+        left_btm_code,
+        right_btm_code,
+        trailing_edge=trailing_edge
+    )
+    import pathlib
+
+    pathlib.Path("out.nc").write_text(gcode)
 
 if __name__ == "__main__":
     rich.traceback.install()
+    machine_def = tomllib.loads(pathlib.Path("machine.toml").read_text())
 
     # Example usage
-    wing = geometry.get_wing_surface_from_avl_file("synergyII/synergyII.avl")
+    wing = geometry.get_wing_surface_from_avl_file("synergyII\synergyIImod.avl")
 
-    idx = 3
+    idx = machine_def["cut"]["section"]
     deltaZ = wing.sections[idx + 1].y_le - wing.sections[idx].y_le
 
     section = WingSection(
@@ -291,13 +409,13 @@ if __name__ == "__main__":
         outer_chord=wing.sections[idx + 1].chord,
     )
 
+
     print(section)
     # plot_2d(wing)
-    machine_def = tomllib.loads(pathlib.Path("machine.toml").read_text())
-    deltaZ
+    
     # override deltaZ because we will be cutting that
-    machine_def["stock"]["volume"]["deltaZ"] = (
-        deltaZ * machine_def["stock"]["offset"]["side"]
-    )
-    # machine_def["stock"]["volume"]["deltaY"] *= machine_def["stock"]["offset"]["side"]
+    machine_def["stock"]["volume"]["deltaZ"] = deltaZ
+    if machine_def["stock"]["offset"]["absoluteZ"] > 0:
+        machine_def["stock"]["offset"]["absoluteZ"] = -machine_def["work"]["volume"]["deltaZ"] + machine_def["stock"]["offset"]["absoluteZ"] + machine_def["stock"]["volume"]["deltaZ"]
+        
     cut_section(section, machine_def)

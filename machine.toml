@@ -1,7 +1,7 @@
 [work.volume]
-deltaX = 20 # downstream
-deltaY = 5  # up-down
-deltaZ = 20 # left-right
+deltaX = 11 # downstream
+deltaY = 3  # up-down
+deltaZ = 24 # left-right
 
 [stock.volume]
 deltaX = 8 # downstream
@@ -11,14 +11,14 @@ deltaY = 2  # up-down
 
 [stock.offset]
 # The position of the stock in absolute machine coords location of the front bottom left of the stock
-absoluteX = 3
-absoluteY = 0
-absoluteZ = -3
+absoluteX = 0.25
+absoluteY = 0.0
+absoluteZ = 6.25 # negative taken as offset from left, positive taken as offset from right
 
-side = +1 # +1 for left positive Z side, -1 for negative Z side
 
 [cut]
-kerf = 0.1
+kerf = 0.06
 feedrate = 300
 rapid = 1000
-
+leading_edge_offsetY = 0.5
+section = 2

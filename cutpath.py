@@ -165,12 +165,13 @@ def connect_lead_out(linestring: shapely.geometry.LineString, point):
 def compute_cutpaths(
     coords: np.ndarray,
     kerf=0.1,
-    start_point=-1,
+    start_point=0,
     exit_point=10,
+    n_points=500
 ):
     shape = shapely.geometry.LineString(coords)
     shape = shapely.geometry.LineString(
-        shape.interpolate(np.linspace(0, 1, 1000, endpoint=True), normalized=True)
+        shape.interpolate(np.linspace(0, 1, n_points, endpoint=True), normalized=True)
     )
     cutline = shape.parallel_offset(kerf / 2)
 
@@ -185,7 +186,7 @@ def compute_cutpaths(
         )
         .apply(
             shapely.geometry.LineString.interpolate,
-            distance=np.linspace(0, 1, 1000, endpoint=True),
+            distance=np.linspace(0, 1, n_points, endpoint=True),
             normalized=True,
         )
         .apply(shapely.geometry.LineString)
@@ -207,7 +208,7 @@ def compute_cutpaths(
         Chainable(shapely.geometry.LineString(cutline_coords[leading_edge_idx:]))
         .apply(
             shapely.geometry.LineString.interpolate,
-            distance=np.linspace(0, 1, 1000, endpoint=True),
+            distance=np.linspace(0, 1, n_points, endpoint=True),
             normalized=True,
         )
         .apply(shapely.geometry.LineString)
@@ -373,15 +374,15 @@ if __name__ == "__main__":
     plotter = pv.Plotter()
 
     # Define Machine Volume (cutting area)
-    machine_bounds = pv.Box(bounds=(0, 20, 0, 10, 0, 20))
+    machine_bounds = pv.Box(bounds=(0, 24, 0, 11, 0, 3))
     plotter.add_mesh(machine_bounds, color="gray", opacity=0.3, style="wireframe")
 
     # Define Stock Volume (material to be cut)
     stock = pv.Box(bounds=(0, 10, 0, 2, 3, 11))
     plotter.add_mesh(stock, color="pink", opacity=0.5)
 
-    left = wing.sections[3]
-    right = wing.sections[4]
+    left = wing.sections[0]
+    right = wing.sections[1]
     offset = np.array([[left.x_le, 0]])
     # fig = plt.figure()
     # ax = fig.add_subplot()
@@ -422,10 +423,10 @@ if __name__ == "__main__":
     )
 
     left_top_cut, right_top_cut = project_cut_paths_to_planes(
-        left_top_cut, right_top_cut, 3, right.y_le + 3 - left.y_le, 0, 15
+        left_top_cut, right_top_cut, 9.25, right.y_le + 9.25 - left.y_le, 0, 24
     )
     left_btm_cut, right_btm_cut = project_cut_paths_to_planes(
-        left_btm_cut, right_btm_cut, 3, right.y_le + 3 - left.y_le, 0, 15
+        left_btm_cut, right_btm_cut, 9.25, right.y_le + 9.25 - left.y_le, 0, 25
     )
 
     # plot_line_3d(left_top_cut, ax)
